@@ -1,13 +1,13 @@
 version: "3"
 
 x-common-environment: &common-environment
-  AWS_ACCESS_KEY_ID: admin
+  AWS_ACCESS_KEY_ID: geo_icehouse_admin
   AWS_SECRET_ACCESS_KEY: password
-  AWS_REGION: us-east-1
+  AWS_REGION: eu-west-3
 
 services:
   trino:
-    image: trinodb/trino
+    image: docker.io/trinodb/trino
     container_name: trino
     networks:
       iceberg_net:
@@ -15,13 +15,13 @@ services:
       - rest
       - minio
     volumes:
-      - ./trino/iceberg.properties:/etc/trino/catalog/iceberg.properties
-      - ./trino/test-schema.sql:/home/trino/test-schema.sql
+      - ./trino/iceberg.properties:/etc/trino/catalog/iceberg.properties:rw,z
+      - ./trino/test-schema.sql:/home/trino/test-schema.sql:rw,z
     environment:
       <<: *common-environment
 
   rest:
-    image: tabulario/iceberg-rest
+    image: docker.io/tabulario/iceberg-rest
     container_name: iceberg-rest
     networks:
       iceberg_net:
@@ -32,43 +32,45 @@ services:
       - 8181:8181
     environment:
       <<: *common-environment
-      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_WAREHOUSE: s3://icehouse/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
-      CATALOG_URI: jdbc:postgresql://postgres/demo_catalog
-      CATALOG_JDBC_USER: admin
+      CATALOG_URI: jdbc:postgresql://postgres/geodb
+      CATALOG_JDBC_USER: geo_icehouse_admin
       CATALOG_JDBC_PASSWORD: password
 
   postgres:
-    image: postgres:13
+    image: docker.io/postgis/postgis:16-3.4
     container_name: postgres
     environment:
       PGDATA: /var/lib/postgresql/data
-      POSTGRES_USER: admin
+      POSTGRES_USER: geo_icehouse_admin
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: demo_catalog
+      POSTGRES_DB: geodb
       POSTGRES_HOST_AUTH_METHOD: md5
     networks:
       iceberg_net:
+    ports:
+      - 5432:5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d demo_catalog"]
+      test: ["CMD-SHELL", "pg_isready -U geo_icehouse_admin -d geodb"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio
     container_name: minio
     environment:
-      MINIO_ROOT_USER: admin
+      MINIO_ROOT_USER: geo_icehouse_admin
       MINIO_ROOT_PASSWORD: password
       MINIO_DOMAIN: minio
     networks:
       iceberg_net:
         aliases:
-          - warehouse.minio
+          - icehouse.minio
     volumes:
       - minio_data:/data
     ports:
@@ -79,7 +81,7 @@ services:
   mc:
     depends_on:
       - minio
-    image: minio/mc
+    image: quay.io/minio/mc
     container_name: mc
     networks:
       iceberg_net:
@@ -87,9 +89,9 @@ services:
       <<: *common-environment
     entrypoint: >
       /bin/sh -c "
-          until (/usr/bin/mc config host add minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done;
-          /usr/bin/mc mb minio/warehouse;
-          /usr/bin/mc policy set public minio/warehouse;
+          until (/usr/bin/mc config host add minio http://minio:9000 geo_icehouse_admin password) do echo '...waiting...' && sleep 1; done;
+          /usr/bin/mc mb minio/icehouse;
+          /usr/bin/mc policy set public minio/icehouse;
           tail -f /dev/null
       "      
 
